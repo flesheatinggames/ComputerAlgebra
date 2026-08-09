@@ -82,7 +82,15 @@ namespace ComputerAlgebra
             Parser parser = new Parser(Namespace.Global) { Culture = culture };
             return parser.Parse(s);
         }
-        public static Expression Parse(string s) { return Parse(s, CultureInfo.InstalledUICulture); }
+        /// <remarks>
+        /// The invariant culture, not the machine's. An expression written as a string is source
+        /// code, not a number typed by a person: it comes from a test, a component model, or a file
+        /// that has to mean the same thing everywhere. Under a locale whose decimal separator is a
+        /// comma the old default made "2.1" fail to parse, which is a shipped-file corruption risk
+        /// rather than a test nuisance — a circuit written on one machine would not load on another.
+        /// A caller who really is parsing something a person typed passes their culture explicitly.
+        /// </remarks>
+        public static Expression Parse(string s) { return Parse(s, CultureInfo.InvariantCulture); }
 
         // Expression operators.
         public static LazyExpression operator +(Expression L, Expression R) { return new LazyExpression(Sum.New(L, R)); }

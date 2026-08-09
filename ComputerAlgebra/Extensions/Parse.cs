@@ -111,7 +111,9 @@ namespace ComputerAlgebra
         private Namespace context = Namespace.Global;
         public Namespace Context { get { return context; } set { context = value; } }
 
-        private CultureInfo culture = CultureInfo.InstalledUICulture;
+        // The invariant culture rather than the machine's, for the reason given on Expression.Parse:
+        // an expression in a string is source, and source has to mean one thing everywhere.
+        private CultureInfo culture = CultureInfo.InvariantCulture;
         public CultureInfo Culture { get { return culture; } set { culture = value; } }
 
         private TokenStream tokens;
