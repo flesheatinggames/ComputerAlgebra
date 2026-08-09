@@ -138,7 +138,14 @@ namespace ComputerAlgebra.LinqCompiler
         private LinqExpr Int(Expression For, LinqExpr x)
         {
             LinqExpr _int = target.Decl(Scope.Intermediate, x.Type);
-            target.Map(Scope.Intermediate, For, _int);
+            // Registering the intermediate under the expression it came from is what makes a later
+            // compilation of the same expression reuse this value instead of recomputing it. Not
+            // registering it leaves the value computed but unreachable, so every later occurrence is
+            // emitted again — which is the control this project uses to find out what the reuse is
+            // worth and whether it is correct. Off by default costs nothing; on by default is the
+            // behaviour that has always existed.
+            if (target.ReuseIntermediates)
+                target.Map(Scope.Intermediate, For, _int);
             target.Add(LinqExpr.Assign(_int, x));
             return _int;
         }

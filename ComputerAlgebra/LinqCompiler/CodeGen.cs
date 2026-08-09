@@ -121,6 +121,19 @@ namespace ComputerAlgebra.LinqCompiler
         public void SyncPoint() { intermediates.Clear(); }
 
         /// <summary>
+        /// Whether a computed intermediate is remembered, so that a later compilation of the same
+        /// expression reuses it rather than recomputing it. True by default, which is the behaviour
+        /// this compiler has always had.
+        /// </summary>
+        /// <remarks>
+        /// Turning it off makes every occurrence of an expression emit its own arithmetic. That is
+        /// slower and produces a larger tree, and it is the control that makes the reuse's effect on
+        /// a result measurable: with reuse off there is nothing cached, so any difference between a
+        /// run with it on and a run with it off is the reuse and nothing else.
+        /// </remarks>
+        public bool ReuseIntermediates { get; set; } = true;
+
+        /// <summary>
         /// Look up an existing expression in the map and intermediates.
         /// </summary>
         /// <param name="Expr"></param>
