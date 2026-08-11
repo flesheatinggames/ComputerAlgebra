@@ -90,7 +90,12 @@ namespace ComputerAlgebra
             int dc = d.CompareTo(x.d);
 
             if (dc == 0) return nc;
-            if (nc == 0) return -dc;
+            // With the numerators equal, a bigger denominator is a smaller number — but only while
+            // the numerator is positive. Below zero a bigger denominator is closer to zero and so
+            // the larger of the two: -1/4 is greater than -1/2, and this shortcut used to say the
+            // opposite. The general case at the end of this method gets it right, which is why the
+            // fault only showed on the pairs that took the shortcut.
+            if (nc == 0) return n.Sign >= 0 ? -dc : dc;
 
             return (n * x.d).CompareTo(x.n * d);
         }
@@ -125,7 +130,23 @@ namespace ComputerAlgebra
         public static BigRational operator ^(BigRational a, int b)
         {
             if (b < 0)
-                return Unchecked(BigInteger.Pow(a.d, -b), BigInteger.Pow(a.n, -b));
+            {
+                // Raising to a negative power swaps the numerator and the denominator, so a
+                // negative number comes back with its sign in the denominator. That is not the
+                // canonical form the rest of this type assumes: Equals and GetHashCode compare the
+                // two parts rather than the value, CompareTo reads the sign off the numerator
+                // alone, and Abs negates the numerator only — so -4/3 written as 4/-3 is unequal
+                // to itself, unordered against itself, and has a negative absolute value. Nothing
+                // else here produces a value outside canonical form, so fixing it at the one place
+                // that did is enough.
+                //
+                // Only the sign needs correcting. A canonical a has no common factor between its
+                // parts, and neither do their powers, so there is no divisor to take out and the
+                // big-integer greatest common divisor the checked constructor would compute is not
+                // worth paying for on a path the elimination runs for every pivot.
+                BigInteger n = BigInteger.Pow(a.d, -b), d = BigInteger.Pow(a.n, -b);
+                return d.Sign == -1 ? Unchecked(-n, -d) : Unchecked(n, d);
+            }
             else
                 return Unchecked(BigInteger.Pow(a.n, b), BigInteger.Pow(a.d, b));
         }

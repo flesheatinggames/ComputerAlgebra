@@ -7,6 +7,20 @@ namespace ComputerAlgebra
     public static class FactorExtension
     {
         // Enumerates x, splitting negative constants into a positive constant and -1.
+        //
+        // Everything yielded here is multiplied back together below — a term the chosen factor does
+        // not divide is rebuilt with Product.New, and a term it does divide is rebuilt from what is
+        // left after the factor is removed — so the product of what this yields has to be x itself.
+        // Splitting -2 into -1 and 2 keeps that, and is what lets 2*A - 2*B factor out the 2.
+        //
+        // Yielding the base of a power alongside the power did not. It was there so that x^2 and
+        // x^3 could be seen to share an x, but nothing divided the term by the factor it removed:
+        // pulling x out of the list [x^2, x] left [x^2], which multiplied by x is x^3 and not x^2.
+        // A/x + B/x came back as (A + B)*x/x, which is A + B, and A/x + B/x^2 did not terminate.
+        // Nothing in this library produced a sum of reciprocals until Stompbench milestone A4 made
+        // a circuit's coefficients symbolic, which is why it went unnoticed; a solved circuit whose
+        // coefficients are all numbers has no power among its terms and never reached it. See
+        // docs/stompbench-a4-result.md.
         private static IEnumerable<Expression> FactorsOf(Expression x)
         {
             foreach (Expression i in Product.TermsOf(x))
@@ -15,11 +29,6 @@ namespace ComputerAlgebra
                 {
                     yield return -1;
                     yield return Real.Abs((Real)i);
-                }
-                else if (i is Power power)
-                {
-                    yield return i;
-                    yield return power.Left;
                 }
                 else
                 {
