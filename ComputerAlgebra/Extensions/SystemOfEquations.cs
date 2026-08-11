@@ -128,6 +128,18 @@ namespace ComputerAlgebra
             // Select the larger pivot if this is a constant, using the PivotConditions.
             if (!(ij is Constant) && PivotConditions != null)
                 ij = ij.Evaluate(PivotConditions);
+
+            // An expression that is not zero but evaluates to zero is as unusable as one that is,
+            // and refusing it here is the only place that can tell. Eliminating with it divides by
+            // its reciprocal, so choosing it produces an infinity at the first evaluation rather
+            // than a bad answer, and the test above cannot see it because the expression is
+            // genuinely not the zero expression — it is a difference of two free parameters that
+            // happen to be equal, which is what two identical potentiometers at the same position
+            // give. Added by Stompbench milestone A4; before it nothing ever supplied
+            // PivotConditions, so this case could not arise.
+            if (ij is Constant Z && Z.Value.EqualsZero())
+                return Real.NegativeInfinity;
+
             return (ij is Constant C) ? Real.Abs(C.Value) : 0;
         }
 
