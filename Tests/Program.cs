@@ -169,6 +169,63 @@ namespace Tests
             return S.Solve(columns);
         }
 
+        /// <summary>
+        /// Splits a system into its independent parts and checks that a caller who keeps them all
+        /// gets the same parts as a caller who consumes each one before asking for the next.
+        /// </summary>
+        /// <remarks>
+        /// Partition builds every system it yields out of two lists it reuses and clears between
+        /// steps, and until this was fixed it handed those lists straight to the system rather than
+        /// copying them, so everything already yielded emptied as the loop moved on. Both callers in
+        /// the circuit library are plain foreach loops over the enumeration, which consume each
+        /// system before the clear reaches it, so the fault was invisible; one ToList() anywhere
+        /// would have produced a set of empty systems and a circuit with no equations in it.
+        ///
+        /// Materializing the enumeration before looking at anything is the whole test, and it has to
+        /// be the first thing done rather than a convenience, because deferring it is exactly what
+        /// hides the fault.
+        /// </remarks>
+        static void TestPartition(string Name, Expression[] Equations, Expression[] Unknowns, int[] Sizes)
+        {
+            SystemOfEquations S = new SystemOfEquations(Equations.Cast<Equal>(), Unknowns);
+            List<SystemOfEquations> parts = S.Partition().ToList();
+
+            if (parts.Count != Sizes.Length)
+                throw new Exception(String.Format("{0}: expected {1} independent parts, got {2}",
+                    Name, Sizes.Length, parts.Count));
+
+            // Sorted, because which part comes out first is Partition's business and not the point.
+            int[] found = parts.Select(i => i.Unknowns.Count()).OrderBy(i => i).ToArray();
+            int[] wanted = Sizes.OrderBy(i => i).ToArray();
+            for (int i = 0; i < wanted.Length; ++i)
+                if (found[i] != wanted[i])
+                    throw new Exception(String.Format("{0}: parts hold {1} unknowns, expected {2}",
+                        Name, String.Join(", ", found), String.Join(", ", wanted)));
+
+            // Every unknown lands in exactly one part, and every part has an equation per unknown —
+            // an emptied part passes neither.
+            List<Expression> all = parts.SelectMany(i => i.Unknowns).ToList();
+            if (all.Count != Unknowns.Length || Unknowns.Any(i => !all.Any(j => j.Equals(i))))
+                throw new Exception(String.Format("{0}: the parts hold {{{1}}}, expected {{{2}}}",
+                    Name, String.Join(", ", all), String.Join(", ", Unknowns)));
+
+            foreach (SystemOfEquations part in parts)
+                if (part.Equations.Count() != part.Unknowns.Count())
+                    throw new Exception(String.Format("{0}: a part has {1} equations for {2} unknowns",
+                        Name, part.Equations.Count(), part.Unknowns.Count()));
+
+            // And each part still solves once held, which is what a caller would do with it.
+            foreach (SystemOfEquations part in parts)
+            {
+                int count = part.Unknowns.Count();
+                part.RowReduce();
+                part.BackSubstitute();
+                if (part.Solve().Count != count)
+                    throw new Exception(String.Format("{0}: a part of {1} unknowns did not solve once held",
+                        Name, count));
+            }
+        }
+
         static void Main(string[] args)
         {
             System.Diagnostics.Stopwatch timer = new System.Diagnostics.Stopwatch();
@@ -468,6 +525,20 @@ namespace Tests
                 new Expression[] { "x", "y", "z", "w", "v" },
                 new Expression[] { "x", "y", "z", "w" },
                 new Arrow[] { Arrow.New("G", 0.5), Arrow.New("H", 2), Arrow.New("K", 1e-4) });
+
+            // Splitting a system into independent parts, with every part kept.
+            TestPartition("two independent pairs",
+                new Expression[] { "2*x + 3*y == 1", "x - y == 4", "5*z + w == 2", "z - 3*w == 6" },
+                new Expression[] { "x", "y", "z", "w" },
+                new int[] { 2, 2 });
+            TestPartition("three parts of different sizes",
+                new Expression[] { "2*x == 4", "3*y + z == 1", "y - z == 2", "u + v + w == 3", "u - v == 1", "v + 2*w == 5" },
+                new Expression[] { "x", "y", "z", "u", "v", "w" },
+                new int[] { 1, 2, 3 });
+            TestPartition("one part, everything connected",
+                new Expression[] { "x + y + z == 1", "x - y == 2", "y + 2*z == 3" },
+                new Expression[] { "x", "y", "z" },
+                new int[] { 3 });
 
             // NSolve.
             Test("NSolve[x == Cos[x], x->0.5]", "x->0.739085");

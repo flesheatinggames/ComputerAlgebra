@@ -156,10 +156,18 @@ namespace ComputerAlgebra
         /// </summary>
         public IEnumerable<LinearCombination> Equations { get { return equations.Select(i => LinearCombination.New(i)); } }
 
+        // Copies rather than adopts, because the one caller is Partition, which builds each system
+        // out of two lists it reuses for the next one and clears between them. Adopting them made
+        // every system it had already yielded empty as soon as the loop moved on. Both of its
+        // callers happen to consume each system before asking for the next, so nothing observed it;
+        // a single ToList() on the result would have.
+        //
+        // The equations themselves are shared, not cloned, which is what the class means everywhere
+        // else: a partition owns its rows and the system it came out of has given them up.
         private SystemOfEquations(List<Equation> Equations, List<Expression> Unknowns)
         {
-            equations = Equations;
-            unknowns = Unknowns;
+            equations = new List<Equation>(Equations);
+            unknowns = new List<Expression>(Unknowns);
         }
 
         /// <summary>
@@ -218,10 +226,49 @@ namespace ComputerAlgebra
         }
 
         // How far below the largest pivot available a candidate may be and still be considered on
-        // its other merits. The single-pass rule below has always used a factor of eight; the
-        // two-pass rule keeps the same figure so that the two differ in how they search and not in
-        // what they are willing to accept.
-        private const int PivotTolerance = 8;
+        // its other merits — which, in the two-pass rule below, means being a smaller expression.
+        //
+        // Sixty-four, and the figure is measured rather than inherited. The single-pass rule below
+        // has always used eight, and the two-pass rule started there so that the two would differ
+        // in how they search and not in what they accept. Sweeping it across every schematic in the
+        // repository that has a knob showed eight is nowhere near the best point: on the Orange
+        // Rockerverb the live solve goes from 55 seconds and 134,906 expression nodes at eight to
+        // 945 milliseconds and 13,509 at sixty-four, against a baked solve of 589 milliseconds and
+        // 7,941 nodes. The Marshall JCM2000 goes from 6.2 seconds to 1.1. Nothing gets worse by
+        // more than a factor of two, and several circuits improve by one or two orders.
+        //
+        // What it costs is conditioning, because accepting a pivot sixty-four times smaller means
+        // dividing by something sixty-four times smaller. Measured as the disagreement between the
+        // live render and the baked one across the corpus, the worst case moves from 4.7e-12 of
+        // peak to 1.1e-9 — still four decades inside the 1e-5 the corpus check calls agreement, and
+        // below the least significant bit of any converter. A tolerance of a million was measured
+        // too: it is faster again and is the only setting under which the MXR Phase 90 solves at
+        // all, and it takes the worst case to 2.4e-7, which leaves the only check in this project
+        // that can see a wrong circuit with less than two decades of headroom. That is too much of
+        // the instrument to spend on one circuit, so the Phase 90 is left to its opt-out.
+        //
+        // Reached only when PivotConditions are supplied, so no circuit without a live parameter is
+        // affected by this figure at all. Settable so the sweep can be repeated:
+        // measurements/a4-live-parameters/run-pivot-sweep.sh.
+        public static int PivotTolerance = 64;
+
+        // The largest expression, in atoms, that may be used as a pivot while any smaller one is
+        // available at any usable magnitude at all. Off by default, and it should stay off.
+        //
+        // This is a different lever from the tolerance rather than a stricter version of it: the
+        // tolerance says how much magnitude a smaller expression is worth, and this says that past
+        // a certain size no amount of magnitude is worth it, which means reopening the search to
+        // candidates the magnitude floor had excluded. It was measured across the corpus alongside
+        // the tolerance and it is not safe. Ten of the swept settings produced a different circuit
+        // from the baked one, all of them with a ceiling set and none of them without: the Marshall
+        // JCM2000 renders 292 volts where the circuit renders 0.46, and the Orange Rockerverb is
+        // wrong by two parts in ten thousand. Dropping the floor is what does it — the elimination
+        // divides by something it had already judged too small, which is precisely what supplying
+        // pivot conditions exists to prevent.
+        //
+        // Kept, rather than deleted, so that the next person to have this idea finds the measurement
+        // instead of repeating it.
+        public static int PivotSizeCeiling = int.MaxValue;
 
         /// <summary>
         /// Find the best pivot when the caller has said what the system's free symbols are worth.
@@ -262,6 +309,13 @@ namespace ComputerAlgebra
                 return new Tuple<int, int>(-1, -1);
 
             Real floor = largest / PivotTolerance;
+
+            // The size ceiling, when one is set and everything within the magnitude floor is over
+            // it: drop the floor to zero, so the search considers every usable entry and the rule
+            // below picks the smallest expression among them. Without dropping it the ceiling could
+            // only ever exclude, and excluding every candidate leaves the column unpivoted.
+            if (PivotSizeCeiling != int.MaxValue && !AnyUnder(row, col, maxj, Columns, PivotConditions, floor))
+                floor = 0;
 
             int besti = -1;
             int bestj = -1;
@@ -310,6 +364,20 @@ namespace ComputerAlgebra
                 }
             }
             return new Tuple<int, int>(besti, bestj);
+        }
+
+        // Whether any candidate at or above the magnitude floor is inside the size ceiling.
+        private bool AnyUnder(
+            int row, int col, int maxj, IList<Expression> Columns, IEnumerable<Arrow> PivotConditions, Real floor)
+        {
+            for (int i = row; i < equations.Count; ++i)
+                for (int j = col; j <= maxj; ++j)
+                {
+                    PivotCost c = equations[i].Cost(Columns[j], PivotConditions);
+                    if (c.Magnitude >= floor && c.Size <= PivotSizeCeiling)
+                        return true;
+                }
+            return false;
         }
 
         // Find the best pivot using full or partial pivoting.
